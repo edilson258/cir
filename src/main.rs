@@ -18,6 +18,9 @@ fn main() {
     let content = content.chars().collect::<Vec<char>>();
     let mut lexer = lexer::Lexer::new(&content);
     let tokens = lexer.lex();
+
+    let mut parser = parser::Parser::new(tokens);
+    parser.parse();
 }
 
 pub mod types {
@@ -29,8 +32,8 @@ pub mod types {
 
     #[derive(Clone, Debug, PartialEq)]
     pub enum TokenKind {
-        StrLit, // var, if, function, a, x, ...
-        StrVal, // "hello", ".."
+        StrLit, 
+        StrVal, 
         Numeric,
         PluSymb,
         MinSymb,
@@ -48,6 +51,162 @@ pub mod types {
         Hash,
         LessThan,
         GraThan,
+    }
+}
+
+pub mod ast {
+    #[derive(Clone, Debug, PartialEq)]
+    pub enum ASTNode {
+        Include(String),
+    }
+
+    #[derive(Clone, Debug, PartialEq)]
+    pub struct AST {
+        body: Vec<ASTNode>
+    }
+
+    impl AST {
+        pub fn new() -> Self {
+            Self { body: Vec::new() }
+        }
+
+        pub fn push(&mut self, token: ASTNode) {
+            self.body.push(token);
+        }
+
+        pub fn dump(&mut self) {
+            println!("{:#?}", self);
+        }
+    }
+}
+
+pub mod parser {
+    use exit;
+    use ast::{AST, ASTNode};
+    use types::{Token, TokenKind as TK};
+
+    pub struct Parser {
+        tokens: Vec<Token>,
+        ast: AST,
+    }
+
+    impl Parser {
+        pub fn new(tokens: Vec<Token>) -> Self {
+            Self { 
+                tokens,
+                ast: AST::new()
+            }
+        }
+
+        pub fn parse(&mut self) {
+            while !self.eof() {
+                self.parse_stmt();
+            }
+
+            self.ast.dump();
+        }
+
+        fn parse_stmt(&mut self) {
+            let at = self.eat();
+
+            /*
+             * Handles:
+             *   # ...
+             */
+            if at.kind == TK::Hash {
+                self.parse_deretive();
+                return;
+            }
+
+            println!("ERROR:{}: Unable to parse {:?}", line!(), at);
+        }
+
+        /* Handles:
+         *   #include ...
+         *   #define ...
+         */
+        fn parse_deretive(&mut self) {
+            let at = self.eat_kind(TK::StrLit);
+            match at.value.as_str() {
+                "include" => self.parse_deretive_include(),
+                "define" => self.parse_deretive_define(),
+                _ => {
+                    eprintln!("ERROR:{}: Invalid preprocessing: {}", line!(), at.value);
+                    exit(1);
+                }
+            }
+        }
+
+        /* Handles:
+         *   #include ...
+         */
+        fn parse_deretive_include(&mut self) {
+            let at = self.eat();
+
+            let mut filepath = String::new();
+
+            match at.kind {
+                TK::LessThan => {
+                    while self.at().kind != TK::GraThan {
+                        let x = self.eat();
+                        match x.kind {
+                            TK::StrLit  |
+                            TK::DivSymb |
+                            TK::Dot     => {
+                                filepath.extend(x.value.chars());
+                            },
+                            _ => {
+                                eprintln!("ERROR:{}: Invalid file path", line!());
+                                exit(1);
+                            }
+                        }
+                    }
+                    self.eat_kind(TK::GraThan);
+                },
+                TK::StrVal => {
+                    filepath.extend(at.value.chars());
+                },
+                _ => {
+                    eprintln!("ERROR:{}: Invalid preprocessing: {}", line!(), at.value);
+                    exit(1);
+                }
+            }
+
+            let incl_node = ASTNode::Include(filepath);
+            self.ast.push(incl_node);
+        }
+
+        fn parse_deretive_define(&mut self) {
+            todo!();
+        }
+        
+        fn eat_kind(&mut self, kind: TK) -> Token {
+            if self.at().kind != kind {
+                eprintln!("ERROR:{}: Expected: {:?} but found: {:?}", line!(), kind, self.at().kind);
+                exit(1);
+            } 
+            self.eat()
+        }
+
+        fn at(&mut self) -> Token {
+            if self.eof() {
+                eprintln!("ERROR:{}: Unexpected EOF", line!());
+                exit(1);
+            }
+            self.tokens.first().unwrap().clone()
+        }
+
+        fn eat(&mut self) -> Token {
+            if self.eof() {
+                eprintln!("ERROR:{}: Unexpected EOF", line!());
+                exit(1);
+            }
+            self.tokens.remove(0)
+        }
+        
+        fn eof(&self) -> bool {
+            self.tokens.is_empty()
+        }
     }
 }
 
