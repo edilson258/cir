@@ -24,6 +24,17 @@ fn main() {
 }
 
 pub mod types {
+    #[derive(Clone, Debug, PartialEq)]
+    pub enum Type {
+        INT,
+    }
+
+    #[derive(Clone, Debug, PartialEq)]
+    pub struct FuncParam {
+        ttype: Type,
+        name: String,
+    }
+
     #[derive(Clone, Debug)]
     pub struct Token {
         pub kind: TokenKind,
@@ -32,8 +43,8 @@ pub mod types {
 
     #[derive(Clone, Debug, PartialEq)]
     pub enum TokenKind {
-        StrLit, 
-        StrVal, 
+        StrLit,
+        StrVal,
         Numeric,
         PluSymb,
         MinSymb,
@@ -55,14 +66,32 @@ pub mod types {
 }
 
 pub mod ast {
+    use types::{FuncParam, Type};
+
     #[derive(Clone, Debug, PartialEq)]
     pub enum ASTNode {
         Include(String),
+        FuncDecl {
+            name: String,
+            params: Vec<FuncParam>,
+            ret_type: Type,
+            body: Vec<Box<ASTNode>>,
+        },
+        FunCall {
+            name: String,
+            args: Vec<Box<ASTNode>>,
+        },
+        Return(Box<ASTNode>),
+        StrLit(String),
+        StrVal(String),
+        IntLit(i32),
+        Semicolon,
+        EOF,
     }
 
     #[derive(Clone, Debug, PartialEq)]
     pub struct AST {
-        body: Vec<ASTNode>
+        body: Vec<ASTNode>,
     }
 
     impl AST {
@@ -81,9 +110,9 @@ pub mod ast {
 }
 
 pub mod parser {
+    use ast::{ASTNode, AST};
     use exit;
-    use ast::{AST, ASTNode};
-    use types::{Token, TokenKind as TK};
+    use types::{FuncParam, Token, TokenKind as TK, Type};
 
     pub struct Parser {
         tokens: Vec<Token>,
@@ -92,44 +121,137 @@ pub mod parser {
 
     impl Parser {
         pub fn new(tokens: Vec<Token>) -> Self {
-            Self { 
+            Self {
                 tokens,
-                ast: AST::new()
+                ast: AST::new(),
             }
         }
 
         pub fn parse(&mut self) {
             while !self.eof() {
-                self.parse_stmt();
+                let node = self.parse_stmt();
+                self.ast.push(node);
             }
 
+            self.ast.push(ASTNode::EOF);
             self.ast.dump();
         }
 
-        fn parse_stmt(&mut self) {
-            let at = self.eat();
+        fn parse_stmt(&mut self) -> ASTNode {
+            let at = self.at();
 
-            /*
-             * Handles:
+            /* Handles:
              *   # ...
              */
             if at.kind == TK::Hash {
-                self.parse_deretive();
-                return;
+                self.eat(); // remove `#`
+                return self.parse_deretive();
             }
 
-            println!("ERROR:{}: Unable to parse {:?}", line!(), at);
+            /* Handles:
+             *   int ...
+             */
+            if at.kind == TK::StrLit && self.is_decl(&at.value) {
+                self.eat(); // remove `int` or ...
+                return self.parse_decl(at);
+            }
+
+            if at.value.as_str() == "return" {
+                self.eat(); // remove `return`
+                return self.parse_return();
+            }
+
+            self.parse_expr()
+        }
+
+        fn parse_expr(&mut self) -> ASTNode {
+            self.parse_func_call()
+        }
+
+        fn parse_func_call(&mut self) -> ASTNode {
+            let func = self.parse_prim_expr();
+            if self.at().kind == TK::OpenPar {
+                self.eat(); // remove `(`
+
+                let mut args: Vec<Box<ASTNode>> = vec![];
+                while self.at().kind != TK::ClosPar {
+                    args.push(Box::new(self.parse_expr()));
+                }
+                self.eat_kind(TK::ClosPar); // remove `)`
+
+                return ASTNode::FunCall {
+                    name: self.get_strlit_val(&func),
+                    args,
+                };
+            }
+            func
+        }
+
+        fn parse_return(&mut self) -> ASTNode {
+            ASTNode::Return(Box::new(self.parse_expr()))
+        }
+
+        fn parse_decl(&mut self, prev_tok: Token) -> ASTNode {
+            let at = self.eat_kind(TK::StrLit);
+
+            /* TODO:
+             *   - Validate at.value as identifier
+             */
+
+            match self.eat().kind {
+                TK::OpenPar => {
+                    return self.parse_decl_func(self.str2type(&prev_tok.value), at.value)
+                }
+                _ => {
+                    eprintln!("ERROR:{}: Expected function declaration for now", line!());
+                    exit(1);
+                }
+            }
+        }
+
+        fn parse_decl_func(&mut self, ret_type: Type, name: String) -> ASTNode {
+            let params = self.parse_decl_func_params();
+            let mut body: Vec<Box<ASTNode>> = vec![];
+
+            self.eat_kind(TK::OpenBlk);
+            while self.at().kind != TK::ClosBlk {
+                body.push(Box::new(self.parse_stmt()));
+            }
+            self.eat_kind(TK::ClosBlk);
+
+            ASTNode::FuncDecl {
+                name,
+                ret_type,
+                params,
+                body,
+            }
+        }
+
+        fn parse_decl_func_params(&mut self) -> Vec<FuncParam> {
+            let at = self.eat();
+
+            match at.value.as_str() {
+                "void" => {
+                    self.eat_kind(TK::ClosPar);
+                    return vec![];
+                }
+                ")" => return vec![],
+                _ => {
+                    eprintln!("ERROR:{}: Function params not supported yet", line!());
+                    exit(1);
+                }
+            }
         }
 
         /* Handles:
          *   #include ...
          *   #define ...
          */
-        fn parse_deretive(&mut self) {
+        fn parse_deretive(&mut self) -> ASTNode {
             let at = self.eat_kind(TK::StrLit);
             match at.value.as_str() {
-                "include" => self.parse_deretive_include(),
-                "define" => self.parse_deretive_define(),
+                "include" => return self.parse_deretive_include(),
+                "define" => return self.parse_deretive_define(),
                 _ => {
                     eprintln!("ERROR:{}: Invalid preprocessing: {}", line!(), at.value);
                     exit(1);
@@ -140,7 +262,7 @@ pub mod parser {
         /* Handles:
          *   #include ...
          */
-        fn parse_deretive_include(&mut self) {
+        fn parse_deretive_include(&mut self) -> ASTNode {
             let at = self.eat();
 
             let mut filepath = String::new();
@@ -150,11 +272,9 @@ pub mod parser {
                     while self.at().kind != TK::GraThan {
                         let x = self.eat();
                         match x.kind {
-                            TK::StrLit  |
-                            TK::DivSymb |
-                            TK::Dot     => {
+                            TK::StrLit | TK::DivSymb | TK::Dot => {
                                 filepath.extend(x.value.chars());
-                            },
+                            }
                             _ => {
                                 eprintln!("ERROR:{}: Invalid file path", line!());
                                 exit(1);
@@ -162,29 +282,53 @@ pub mod parser {
                         }
                     }
                     self.eat_kind(TK::GraThan);
-                },
+                }
                 TK::StrVal => {
                     filepath.extend(at.value.chars());
-                },
+                }
                 _ => {
                     eprintln!("ERROR:{}: Invalid preprocessing: {}", line!(), at.value);
                     exit(1);
                 }
             }
 
-            let incl_node = ASTNode::Include(filepath);
-            self.ast.push(incl_node);
+            ASTNode::Include(filepath)
         }
 
-        fn parse_deretive_define(&mut self) {
+        fn parse_deretive_define(&mut self) -> ASTNode {
             todo!();
         }
-        
+
+        fn parse_prim_expr(&mut self) -> ASTNode {
+            let at = self.eat();
+
+            match at.kind {
+                TK::StrLit => ASTNode::StrLit(at.value),
+                TK::StrVal => ASTNode::StrVal(at.value),
+                TK::Numeric => ASTNode::IntLit(at.value.parse::<i32>().unwrap()),
+                TK::Semicolon => ASTNode::Semicolon,
+                _ => {
+                    eprintln!("ERROR:{}: Unsupported primary expression {:?}", line!(), at);
+                    exit(1);
+                }
+            }
+        }
+
+        /*
+         * HELPER Functions 👇
+         * 
+         */
+
         fn eat_kind(&mut self, kind: TK) -> Token {
             if self.at().kind != kind {
-                eprintln!("ERROR:{}: Expected: {:?} but found: {:?}", line!(), kind, self.at().kind);
+                eprintln!(
+                    "ERROR:{}: Expected: {:?} but found: {:?}",
+                    line!(),
+                    kind,
+                    self.at().kind
+                );
                 exit(1);
-            } 
+            }
             self.eat()
         }
 
@@ -203,15 +347,44 @@ pub mod parser {
             }
             self.tokens.remove(0)
         }
-        
+
         fn eof(&self) -> bool {
             self.tokens.is_empty()
+        }
+
+        fn is_decl(&self, x: &str) -> bool {
+            match x {
+                "int" => return true,
+                _ => return false,
+            }
+        }
+
+        fn str2type(&self, s: &str) -> Type {
+            match s {
+                "int" => Type::INT,
+                _ => {
+                    eprintln!("ERROR:{}: Unknown type name {s}", line!());
+                    exit(1);
+                }
+            }
+        }
+
+        fn get_strlit_val(&self, strlit: &ASTNode) -> String {
+            if let ASTNode::StrLit(value) = strlit {
+                return value.to_string();
+            }
+            eprintln!(
+                "ERROR:{}: Expected `String Literal` but found: {:?}",
+                line!(),
+                strlit
+            );
+            exit(1);
         }
     }
 }
 
 pub mod lexer {
-    use types::{ Token, TokenKind };
+    use types::{Token, TokenKind};
 
     pub struct Lexer<'a> {
         stream: &'a [char],
