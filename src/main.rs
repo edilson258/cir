@@ -20,7 +20,39 @@ fn main() {
     let tokens = lexer.lex();
 
     let mut parser = parser::Parser::new(tokens);
-    parser.parse();
+    let ast = parser.parse();
+
+    let mut rt = runtime::Interpreter::new(ast);
+    rt.eval();
+}
+
+pub mod runtime {
+    use ast::{AST, ASTNode};
+
+    pub struct Interpreter {
+        ast: AST,
+    }
+
+    impl Interpreter {
+        pub fn new(ast: AST) -> Self {
+            Self { ast }
+        }
+
+        pub fn eval(&mut self) {
+            loop {
+                let node = self.ast.next();
+                if node.is_none() {
+                    break;
+                }
+
+                self.eval_node_stmt(node.unwrap());
+            }
+        }
+
+        fn eval_node_stmt(&mut self, node: ASTNode) {
+            println!("Node: {:#?}", node);
+        }
+    }
 }
 
 pub mod types {
@@ -106,6 +138,13 @@ pub mod ast {
         pub fn dump(&mut self) {
             println!("{:#?}", self);
         }
+
+        pub fn next(&mut self) -> Option<ASTNode> {
+            if self.body.is_empty() {
+                return None;
+            }
+            Some(self.body.remove(0))
+        }
     }
 }
 
@@ -127,14 +166,14 @@ pub mod parser {
             }
         }
 
-        pub fn parse(&mut self) {
+        pub fn parse(&mut self) -> AST {
             while !self.eof() {
                 let node = self.parse_stmt();
                 self.ast.push(node);
             }
 
             self.ast.push(ASTNode::EOF);
-            self.ast.dump();
+            self.ast.clone()
         }
 
         fn parse_stmt(&mut self) -> ASTNode {
