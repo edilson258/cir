@@ -26,16 +26,57 @@ fn main() {
     rt.eval();
 }
 
+pub mod libc {
+    pub struct LibC {
+        pub filenames: Vec<String>,
+        pub stdio: Stdio
+    }
+
+    impl LibC {
+        pub fn new() -> Self {
+            let filenames: Vec<String> = vec![
+                "stdio.h".to_string()
+            ];
+            let stdio = Stdio::new();
+
+            Self { filenames, stdio }
+        }
+    }
+
+    pub struct Stdio {
+        func_names: Vec<String>
+    }
+
+    impl Stdio {
+        pub fn new() -> Self {
+            let func_names: Vec<String> = vec![
+                "printf".to_string()
+            ];
+
+            Self { func_names }
+        }
+
+        pub fn printf(&mut self, x: &str) {
+            print!("{x}");
+        }
+    }
+}
+
 pub mod runtime {
     use ast::{AST, ASTNode};
+    use libc::LibC;
 
     pub struct Interpreter {
         ast: AST,
+        libc: LibC,
     }
 
     impl Interpreter {
         pub fn new(ast: AST) -> Self {
-            Self { ast }
+            Self { 
+                ast, 
+                libc: LibC::new() 
+            }
         }
 
         pub fn eval(&mut self) {
@@ -51,6 +92,7 @@ pub mod runtime {
 
         fn eval_node_stmt(&mut self, node: ASTNode) {
             println!("Node: {:#?}", node);
+            self.libc.stdio.printf("Hello world\n");
         }
     }
 }
