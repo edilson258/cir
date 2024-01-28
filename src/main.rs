@@ -28,32 +28,32 @@ fn main() {
 
 pub mod libc {
     pub struct LibC {
-        pub filenames: Vec<String>,
+        pub filepaths: Vec<String>,
         pub stdio: Stdio
     }
 
     impl LibC {
         pub fn new() -> Self {
-            let filenames: Vec<String> = vec![
+            let filepaths: Vec<String> = vec![
                 "stdio.h".to_string()
             ];
             let stdio = Stdio::new();
 
-            Self { filenames, stdio }
+            Self { filepaths, stdio }
         }
     }
 
     pub struct Stdio {
-        func_names: Vec<String>
+        pub funcnames: Vec<String>
     }
 
     impl Stdio {
         pub fn new() -> Self {
-            let func_names: Vec<String> = vec![
+            let funcnames: Vec<String> = vec![
                 "printf".to_string()
             ];
 
-            Self { func_names }
+            Self { funcnames }
         }
 
         pub fn printf(&mut self, x: &str) {
@@ -66,8 +66,32 @@ pub mod runtime {
     use ast::{AST, ASTNode};
     use libc::LibC;
 
+    #[derive(Debug)]
+    struct Function {
+        name: String,
+        location: String
+    }
+
+    #[derive(Debug)]
+    struct Env {
+        functions: Vec<Function>
+    }
+
+    impl Env {
+        pub fn new() -> Self {
+            Self {
+                functions: vec![]
+            }
+        }
+
+        pub fn push_function(&mut self, function: Function) {
+            self.functions.push(function);
+        }
+    }
+
     pub struct Interpreter {
         ast: AST,
+        env: Env,
         libc: LibC,
     }
 
@@ -75,7 +99,8 @@ pub mod runtime {
         pub fn new(ast: AST) -> Self {
             Self { 
                 ast, 
-                libc: LibC::new() 
+                env: Env::new(),
+                libc: LibC::new(),
             }
         }
 
@@ -88,12 +113,33 @@ pub mod runtime {
 
                 self.eval_node_stmt(node.unwrap());
             }
+
+            println!("{:#?}", self.env);
         }
 
         fn eval_node_stmt(&mut self, node: ASTNode) {
-            println!("Node: {:#?}", node);
-            self.libc.stdio.printf("Hello world\n");
+            match node {
+                ASTNode::Include(filepath) => self.eval_node_include(filepath),
+                _ => {
+                    eprintln!("ERROR:{}: Evaluation of {:#?} not supported yet", line!(), node);
+                }
+            }
         }
+
+        fn eval_node_include(&mut self, filepath: String) {
+            if !self.libc.filepaths.contains(&filepath) {
+                eprintln!("ERROR: File {filepath} not found. only looking for libc files for now");
+                return;
+            }
+
+            for func in &self.libc.stdio.funcnames {
+                self.env.push_function(Function {
+                    name: func.to_string(),
+                    location: String::from(format!("{}/{}", "libc", func)),
+                })
+            }
+        }
+
     }
 }
 
